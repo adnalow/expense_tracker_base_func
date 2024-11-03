@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart'; // Add this import for date formatting
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // Import shared_preferences
 
 void main() {
   runApp(const MyApp());
@@ -29,11 +30,106 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
+  
   int tbalance = 0; // Total balance
   List<Map<String, dynamic>> history = []; // List to store title, amount, and timestamp history
 
-  final titleController = TextEditingController(); // Controller for title input
-  final amountController = TextEditingController(); // Controller for amount input
+  final titleController = TextEditingController();
+  final amountController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData(); // Load data when the app starts
+  }
+
+  // Function to load data from local storage
+  Future<void> _loadData() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      tbalance = prefs.getInt('tbalance') ?? 0;
+      String? historyString = prefs.getString('history');
+      if (historyString != null) {
+        history = List<Map<String, dynamic>>.from(
+          historyString.split(';').where((entry) => entry.isNotEmpty).map((entry) {
+            List<String> parts = entry.split('|');
+            return {
+              "title": parts[0],
+              "amount": int.parse(parts[1]),
+              "timestamp": parts[2],
+            };
+          }),
+        );
+      }
+    });
+  }
+
+
+  // Function to save data to local storage
+  Future<void> _saveData() async {
+    final prefs = await SharedPreferences.getInstance();
+    prefs.setInt('tbalance', tbalance);
+    String historyString = history.map((entry) {
+      return '${entry["title"]}|${entry["amount"]}|${entry["timestamp"]}';
+    }).join(';');
+    prefs.setString('history', historyString);
+  }
+
+  void _showAdjustDialog(BuildContext context) {
+  showDialog(
+    context: context,
+    builder: (BuildContext context) {
+      return AlertDialog(
+        title: const Text("Adjust Balance", textAlign: TextAlign.center,),
+        content: Column(
+          mainAxisSize: MainAxisSize.min, // Adjust dialog size
+          children: [
+            TextField(
+              controller: amountController, // Reuse your existing controller
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: "Balance",
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          ElevatedButton(
+            onPressed: () async {
+              int? amount = int.tryParse(amountController.text);
+              if (amount != null) {
+                setState(() {
+                  tbalance = amount; // Set the new balance based on user input
+                });
+
+                // Save the new balance to local storage
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setInt('tbalance', tbalance);
+
+                // Optionally, update the history and save it if needed
+                history.insert(0,{
+                  "title": "Balance Adjusted",
+                  "amount": amount,
+                  "timestamp": DateFormat('yyyy-MM-dd – kk:mm').format(DateTime.now()),
+                });
+                await prefs.setString('history', history.map((entry) {
+                  return "${entry['title']}|${entry['amount']}|${entry['timestamp']}";
+                }).join(';'));
+
+                // Clear the input field after saving
+                amountController.clear();
+              }
+              Navigator.of(context).pop(); // Close the dialog after adjusting
+            },
+            child: const Text("Adjust"),
+          ),
+        ],
+      );
+    },
+  );
+}
+
 
   @override
   Widget build(BuildContext context) {
@@ -85,7 +181,7 @@ class _MyHomePageState extends State<MyHomePage> {
                   ),
                   ElevatedButton(
                     onPressed: () {
-                      // Logic for adjusting balance (can be implemented later)
+                      _showAdjustDialog(context);
                     },
                     child: const Text("Adjust"),
                   ),
@@ -109,7 +205,6 @@ class _MyHomePageState extends State<MyHomePage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.start,
                 children: [
-                  // TextField for Title
                   TextField(
                     controller: titleController,
                     decoration: const InputDecoration(
@@ -118,7 +213,6 @@ class _MyHomePageState extends State<MyHomePage> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  // TextField for Amount
                   TextField(
                     controller: amountController,
                     decoration: const InputDecoration(
@@ -137,14 +231,14 @@ class _MyHomePageState extends State<MyHomePage> {
                             setState(() {
                               int? amount = int.tryParse(amountController.text);
                               if (amount != null) {
-                                tbalance += amount; // Add amount to balance
-                                history.insert(0, { // Insert at the beginning of the list
+                                tbalance += amount;
+                                history.insert(0, {
                                   "title": titleController.text,
                                   "amount": amount,
-                                  "timestamp": DateFormat('yyyy-MM-dd – kk:mm').format(DateTime.now()), // Add timestamp
+                                  "timestamp": DateFormat('yyyy-MM-dd – kk:mm').format(DateTime.now()),
                                 });
+                                _saveData(); // Save data after adding
                               }
-                              // Clear text fields after adding
                               titleController.clear();
                               amountController.clear();
                             });
@@ -159,14 +253,14 @@ class _MyHomePageState extends State<MyHomePage> {
                             setState(() {
                               int? amount = int.tryParse(amountController.text);
                               if (amount != null) {
-                                tbalance -= amount; // Deduct amount from balance
-                                history.insert(0, { // Insert at the beginning of the list
+                                tbalance -= amount;
+                                history.insert(0, {
                                   "title": titleController.text,
                                   "amount": -amount,
-                                  "timestamp": DateFormat('yyyy-MM-dd – kk:mm').format(DateTime.now()), // Add timestamp
+                                  "timestamp": DateFormat('yyyy-MM-dd – kk:mm').format(DateTime.now()),
                                 });
+                                _saveData(); // Save data after deduction
                               }
-                              // Clear text fields after deducting
                               titleController.clear();
                               amountController.clear();
                             });
@@ -203,12 +297,11 @@ class _MyHomePageState extends State<MyHomePage> {
                         Text("History"),
                       ],
                     ),
-                    const SizedBox(height: 10), // Space between header and list
+                    const SizedBox(height: 10),
                     Expanded(
                       child: ListView.builder(
                         itemCount: history.length,
                         itemBuilder: (context, index) {
-                          // Get the amount and check if it's positive or negative
                           int amount = history[index]["amount"];
                           String formattedAmount = amount >= 0 ? "+$amount" : amount.toString();
                           return Row(
@@ -219,10 +312,10 @@ class _MyHomePageState extends State<MyHomePage> {
                                 children: [
                                   Text(history[index]["title"] ?? "No Title"),
                                   Text(
-                                    history[index]["timestamp"] ?? "", // Display timestamp
+                                    history[index]["timestamp"] ?? "",
                                     style: const TextStyle(
                                       fontSize: 12,
-                                      color: Colors.grey, // Grey color for timestamp
+                                      color: Colors.grey,
                                     ),
                                   ),
                                 ],
@@ -230,7 +323,7 @@ class _MyHomePageState extends State<MyHomePage> {
                               Text(
                                 formattedAmount,
                                 style: TextStyle(
-                                  color: amount >= 0 ? Colors.green : Colors.red, // Set color based on amount
+                                  color: amount >= 0 ? Colors.green : Colors.red,
                                 ),
                               ),
                             ],
